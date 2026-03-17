@@ -4,31 +4,25 @@
 
 NemoClaw is a layered system. Understanding what runs where saves you hours of debugging.
 
+**On Linux / WSL2:**
 ```
-┌─────────────────────────────────────────────────┐
-│  YOU (host machine)                             │
-│                                                 │
-│  nemoclaw CLI ──► OpenShell Gateway             │
-│                      │                          │
-│                      ▼                          │
-│  ┌──────────────────────────────────────────┐   │
-│  │  SANDBOX (isolated container)            │   │
-│  │                                          │   │
-│  │  OpenClaw Agent                          │   │
-│  │    ├── Skills (audited, sandboxed)       │   │
-│  │    ├── Workspace (/sandbox/)             │   │
-│  │    └── Temp files (/tmp/)                │   │
-│  │                                          │   │
-│  │  Enforced by:                            │   │
-│  │    • Landlock LSM (filesystem)           │   │
-│  │    • seccomp (syscall filtering)         │   │
-│  │    • Network namespaces (egress control) │   │
-│  └──────────────────────────────────────────┘   │
-│                      │                          │
-│                      ▼                          │
-│  Inference Router ──► Cloud API / Local NIM / vLLM
-└─────────────────────────────────────────────────┘
+Linux host (or WSL2 distro)
+  └── Docker Engine
+       └── OpenShell gateway container (k3s)
+            └── Sandbox container (Landlock + seccomp + netns)
+                 └── OpenClaw agent
 ```
+
+**On macOS:**
+```
+macOS host
+  └── Docker Desktop (Linux VM under the hood)
+       └── OpenShell gateway container (k3s)
+            └── Sandbox container (Landlock + seccomp + netns)
+                 └── OpenClaw agent
+```
+
+The security primitives (Landlock, seccomp, network namespaces) run inside the Linux containers, not on the host. This is why macOS works — Docker Desktop provides the Linux kernel, and the sandbox doesn't care what's outside the container.
 
 ## Components
 

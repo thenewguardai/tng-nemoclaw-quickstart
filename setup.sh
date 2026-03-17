@@ -46,32 +46,49 @@ preflight() {
   info "Running pre-flight checks..."
 
   # Check OS
-  if [[ ! -f /etc/os-release ]]; then
-    fail "Cannot detect OS. This script requires Ubuntu 22.04+."
-  fi
-
-  source /etc/os-release
-  if [[ "${ID}" != "ubuntu" ]]; then
-    warn "Detected ${ID} — this script is tested on Ubuntu 22.04+. Proceeding anyway."
-  fi
+  case "$(uname -s)" in
+    Darwin)
+      success "OS: macOS $(sw_vers -productVersion 2>/dev/null || echo '') ✓"
+      ;;
+    Linux)
+      if [[ -f /etc/os-release ]]; then
+        source /etc/os-release
+        success "OS: ${PRETTY_NAME:-Linux} ✓"
+      else
+        warn "Unknown Linux distro — proceeding anyway."
+      fi
+      ;;
+    *)
+      fail "Unsupported OS: $(uname -s)"
+      ;;
+  esac
 
   # Check architecture
   ARCH=$(uname -m)
-  if [[ "${ARCH}" != "x86_64" && "${ARCH}" != "aarch64" ]]; then
-    fail "Unsupported architecture: ${ARCH}. NemoClaw requires x86_64 or aarch64."
+  if [[ "${ARCH}" != "x86_64" && "${ARCH}" != "aarch64" && "${ARCH}" != "arm64" ]]; then
+    fail "Unsupported architecture: ${ARCH}. Need x86_64, aarch64, or arm64."
   fi
 
-  # Check RAM
-  TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-  TOTAL_RAM_GB=$((TOTAL_RAM_KB / 1024 / 1024))
+  # Check RAM (cross-platform)
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    TOTAL_RAM_BYTES=$(sysctl -n hw.memsize 2>/dev/null || echo 0)
+    TOTAL_RAM_GB=$((TOTAL_RAM_BYTES / 1024 / 1024 / 1024))
+  else
+    TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}')
+    TOTAL_RAM_GB=$((TOTAL_RAM_KB / 1024 / 1024))
+  fi
   if [[ ${TOTAL_RAM_GB} -lt 14 ]]; then
-    warn "Only ${TOTAL_RAM_GB}GB RAM detected. 16GB+ recommended. Continuing anyway."
+    warn "Only ${TOTAL_RAM_GB}GB RAM detected. 16GB+ recommended."
   else
     success "RAM: ${TOTAL_RAM_GB}GB ✓"
   fi
 
-  # Check disk space (need at least 20GB free)
-  FREE_DISK_GB=$(df -BG "${HOME}" | tail -1 | awk '{print $4}' | tr -d 'G')
+  # Check disk space (cross-platform)
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    FREE_DISK_GB=$(df -g "${HOME}" | tail -1 | awk '{print $4}')
+  else
+    FREE_DISK_GB=$(df -BG "${HOME}" | tail -1 | awk '{print $4}' | tr -d 'G')
+  fi
   if [[ ${FREE_DISK_GB} -lt 20 ]]; then
     fail "Only ${FREE_DISK_GB}GB free disk space. Need at least 20GB."
   else

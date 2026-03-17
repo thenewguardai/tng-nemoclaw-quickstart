@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # ============================================================================
 # TNG NemoClaw — Deploy NemoClaw + OpenShell
-# Clones repos, builds OpenShell, runs NemoClaw installer
-# Handles cgroup v2 / Docker cgroupns issues (common on WSL2 and modern Linux)
+# macOS (Docker Desktop), native Linux, and WSL2
+#
+# KEY INSIGHT: OpenShell runs k3s inside Docker. The Landlock/seccomp sandbox
+# lives inside the container, not on the host. This means macOS works because
+# Docker Desktop provides a Linux VM under the hood. The NemoClaw CLI is
+# Node.js (cross-platform) and the openshell CLI ships Darwin + Linux binaries.
 # ============================================================================
 
-set -euo pipefail
+set -uo pipefail
 
 CYAN='\033[0;36m'
 GREEN='\033[0;32m'
@@ -22,70 +26,97 @@ warn()    { echo -e "${YELLOW}[deploy]${NC} $1"; }
 fail()    { echo -e "${RED}[deploy]${NC} $1"; exit 1; }
 
 # --- Detect environment -----------------------------------------------------
-IS_WSL=false
-if grep -qi "microsoft\|wsl" /proc/version 2>/dev/null; then
-  IS_WSL=true
-fi
+OS_TYPE="linux"
+case "$(uname -s)" in
+  Darwin) OS_TYPE="macos" ;;
+  Linux)
+    if grep -qi "microsoft\|wsl" /proc/version 2>/dev/null; then
+      OS_TYPE="wsl2"
+    fi
+    ;;
+esac
 
-# --- Fix cgroup v2 for Docker (required by OpenShell/k3s) -------------------
+# --- Fix cgroup v2 for Docker (Linux/WSL2 only) ----------------------------
 fix_cgroup_v2() {
-  # OpenShell's gateway runs k3s inside Docker, which needs cgroupns=host.
-  # Without this, you get: "openat2 /sys/fs/cgroup/kubepods/pids.max: no such file or directory"
-  # NemoClaw's own fix is `nemoclaw setup-spark`, but we handle it proactively.
-
-  local DAEMON_JSON="/etc/docker/daemon.json"
+  # macOS: Docker Desktop manages cgroups internally — skip
+  if [[ "${OS_TYPE}" == "macos" ]]; then
+    info "macOS: Docker Desktop handles cgroup config — skipping."
+    return
+  fi
 
   # Check if cgroup v2 is in use
   if [[ ! -f /sys/fs/cgroup/cgroup.controllers ]]; then
-    info "cgroup v1 detected — no fix needed."
+    info "cgroup v1 — no fix needed."
     return
   fi
 
   info "cgroup v2 detected — checking Docker cgroupns config..."
 
-  # Check if already configured
+  local DAEMON_JSON="/etc/docker/daemon.json"
+
+  # Already configured?
   if [[ -f "${DAEMON_JSON}" ]]; then
-    if grep -q '"default-cgroupns-mode"' "${DAEMON_JSON}" 2>/dev/null; then
-      local CURRENT=$(jq -r '.["default-cgroupns-mode"] // empty' "${DAEMON_JSON}" 2>/dev/null || true)
-      if [[ "${CURRENT}" == "host" ]]; then
-        success "Docker cgroupns=host already configured ✓"
-        return
-      fi
+    local CURRENT
+    CURRENT=$(jq -r '.["default-cgroupns-mode"] // empty' "${DAEMON_JSON}" 2>/dev/null || true)
+    if [[ "${CURRENT}" == "host" ]]; then
+      success "Docker cgroupns=host already configured ✓"
+      return
     fi
   fi
 
-  info "Configuring Docker for cgroupns=host (required by OpenShell/k3s)..."
+  # WSL2 with Docker Desktop: the daemon.json is managed by Docker Desktop on
+  # the Windows side. /etc/docker/ usually doesn't even exist in the WSL2 distro.
+  # Don't try to write a config that will be ignored.
+  if [[ "${OS_TYPE}" == "wsl2" ]]; then
+    # Multiple signals for Docker Desktop: no /etc/docker dir, or docker info context
+    if [[ ! -d "/etc/docker" ]] || docker info 2>/dev/null | grep -qi "docker desktop\|desktop-linux"; then
+      warn "Docker Desktop detected on WSL2."
+      warn ""
+      warn "Set cgroupns=host in Docker Desktop (not in WSL2):"
+      warn "  1. Docker Desktop → Settings → Docker Engine"
+      warn "  2. Add to the JSON:  \"default-cgroupns-mode\": \"host\""
+      warn "  3. Click 'Apply & Restart'"
+      warn ""
+      warn "Or let NemoClaw handle it:"
+      warn "  cd ~/.tng-nemoclaw/NemoClaw && nemoclaw setup-spark"
+      warn ""
+      warn "Continuing — the onboard wizard will prompt if this isn't set."
+      return
+    fi
+  fi
+
+  info "Configuring Docker for cgroupns=host..."
+
+  # Ensure /etc/docker exists
+  sudo mkdir -p /etc/docker
 
   # Build or update daemon.json
   if [[ -f "${DAEMON_JSON}" ]]; then
-    # Merge into existing config
     local EXISTING
     EXISTING=$(cat "${DAEMON_JSON}" 2>/dev/null || echo "{}")
     if ! echo "${EXISTING}" | jq . &>/dev/null; then
-      warn "Existing ${DAEMON_JSON} is not valid JSON. Backing up and replacing."
+      warn "Invalid JSON in ${DAEMON_JSON}. Backing up."
       sudo cp "${DAEMON_JSON}" "${DAEMON_JSON}.bak.$(date +%s)"
       EXISTING="{}"
     fi
     echo "${EXISTING}" | jq '. + {"default-cgroupns-mode": "host"}' | sudo tee "${DAEMON_JSON}" > /dev/null
   else
-    # Create new
     echo '{"default-cgroupns-mode": "host"}' | sudo tee "${DAEMON_JSON}" > /dev/null
   fi
 
-  # Restart Docker to pick up the change
-  info "Restarting Docker to apply cgroup config..."
+  # Restart Docker
+  info "Restarting Docker..."
   if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null 2>&1; then
     sudo systemctl restart docker
   else
     sudo service docker restart 2>/dev/null || true
   fi
 
-  # Wait for Docker to come back
   local RETRIES=0
   while ! docker ps &>/dev/null 2>&1; do
     ((RETRIES++))
     if [[ ${RETRIES} -gt 15 ]]; then
-      fail "Docker didn't come back after cgroup config change. Check 'sudo service docker status'."
+      fail "Docker didn't restart. Check 'sudo service docker status'."
     fi
     sleep 2
   done
@@ -95,79 +126,70 @@ fix_cgroup_v2() {
 
 # --- Clone OpenShell --------------------------------------------------------
 clone_openshell() {
-  OPENSHELL_DIR="${INSTALL_DIR}/OpenShell"
+  local DIR="${INSTALL_DIR}/OpenShell"
 
-  if [[ -d "${OPENSHELL_DIR}" ]]; then
-    info "OpenShell directory exists. Pulling latest..."
-    cd "${OPENSHELL_DIR}" && git pull --ff-only 2>/dev/null || warn "Git pull failed — using existing checkout."
+  if [[ -d "${DIR}" ]]; then
+    info "OpenShell exists. Pulling latest..."
+    cd "${DIR}" && git pull --ff-only 2>/dev/null || warn "Pull failed — using existing."
   else
     info "Cloning NVIDIA OpenShell..."
-    git clone https://github.com/NVIDIA/OpenShell.git "${OPENSHELL_DIR}"
+    git clone https://github.com/NVIDIA/OpenShell.git "${DIR}"
   fi
-
   success "OpenShell source ready ✓"
 }
 
 # --- Install OpenShell ------------------------------------------------------
 install_openshell() {
-  OPENSHELL_DIR="${INSTALL_DIR}/OpenShell"
-  cd "${OPENSHELL_DIR}"
+  local DIR="${INSTALL_DIR}/OpenShell"
+  cd "${DIR}"
 
   info "Installing OpenShell..."
 
-  # OpenShell ships an install.sh that downloads the correct binary
   if [[ -f "install.sh" ]]; then
     chmod +x install.sh
     bash install.sh
   elif [[ -f "Makefile" ]]; then
     make build
   else
-    warn "No standard install method found. Checking if openshell is already in PATH..."
+    warn "No standard install method found."
   fi
 
-  # Verify
+  # Verify — check common install locations
   if command -v openshell &>/dev/null; then
-    success "OpenShell $(openshell --version 2>/dev/null || echo 'installed') ✓"
+    success "openshell $(openshell --version 2>/dev/null || echo '') ✓"
   elif [[ -f "${HOME}/.local/bin/openshell" ]]; then
     export PATH="${HOME}/.local/bin:${PATH}"
-    success "OpenShell installed to ~/.local/bin ✓"
+    success "openshell installed to ~/.local/bin ✓"
   else
-    warn "openshell binary not found in PATH. May need: export PATH=\"\$HOME/.local/bin:\$PATH\""
+    warn "openshell not found in PATH."
+    warn "Try: export PATH=\"\$HOME/.local/bin:\$PATH\""
   fi
 }
 
 # --- Clone NemoClaw ---------------------------------------------------------
 clone_nemoclaw() {
-  NEMOCLAW_DIR="${INSTALL_DIR}/NemoClaw"
+  local DIR="${INSTALL_DIR}/NemoClaw"
 
-  if [[ -d "${NEMOCLAW_DIR}" ]]; then
-    info "NemoClaw directory exists. Pulling latest..."
-    cd "${NEMOCLAW_DIR}" && git pull --ff-only 2>/dev/null || warn "Git pull failed — using existing checkout."
+  if [[ -d "${DIR}" ]]; then
+    info "NemoClaw exists. Pulling latest..."
+    cd "${DIR}" && git pull --ff-only 2>/dev/null || warn "Pull failed — using existing."
   else
     info "Cloning NVIDIA NemoClaw..."
-    git clone https://github.com/NVIDIA/NemoClaw.git "${NEMOCLAW_DIR}"
+    git clone https://github.com/NVIDIA/NemoClaw.git "${DIR}"
   fi
-
   success "NemoClaw source ready ✓"
 }
 
 # --- Run NemoClaw installer -------------------------------------------------
 install_nemoclaw() {
-  NEMOCLAW_DIR="${INSTALL_DIR}/NemoClaw"
-  cd "${NEMOCLAW_DIR}"
+  local DIR="${INSTALL_DIR}/NemoClaw"
+  cd "${DIR}"
 
   info "Running NemoClaw installer..."
-  info "This will:"
-  info "  1. Install Node.js dependencies"
-  info "  2. Set up the OpenShell gateway"
-  info "  3. Configure inference provider"
-  info "  4. Create your first sandbox"
-  info "  5. Apply baseline security policy"
-  info ""
 
   chmod +x install.sh
 
-  # Build env vars for the installer
+  # Build env
   local ENV_VARS=()
   if [[ -n "${NVIDIA_API_KEY:-}" ]]; then
     ENV_VARS+=("NVIDIA_API_KEY=${NVIDIA_API_KEY}")
@@ -176,12 +198,28 @@ install_nemoclaw() {
     ENV_VARS+=("NVIDIA_API_KEY=$(cat "${HOME}/.nvidia-api-key")")
     info "Using NVIDIA API key from ~/.nvidia-api-key."
   else
-    info "No NVIDIA API key. Installer will prompt or use local inference."
+    info "No NVIDIA API key — installer will prompt or use local inference."
   fi
 
-  # Run the installer
-  # NOTE: NemoClaw's install.sh runs npm install + nemoclaw onboard.
-  # The onboard wizard is interactive — we let it run in the foreground.
+  # macOS note: NemoClaw's install.sh may warn about Ubuntu.
+  # The sandbox runs inside Docker (Linux containers), so this is fine.
+  if [[ "${OS_TYPE}" == "macos" ]]; then
+    info ""
+    info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    info "  macOS note: NemoClaw's installer may warn about OS support."
+    info "  The sandbox runs inside Docker (Linux containers), so the"
+    info "  Landlock/seccomp security layer works regardless of host OS."
+    info "  If the installer exits early, finish manually:"
+    info ""
+    info "    cd ${DIR}"
+    info "    npm install"
+    info "    npm link"
+    info "    nemoclaw onboard"
+    info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    info ""
+  fi
+
+  # Run it
   if [[ ${#ENV_VARS[@]} -gt 0 ]]; then
     env "${ENV_VARS[@]}" ./install.sh
   else
@@ -190,38 +228,43 @@ install_nemoclaw() {
 
   local EXIT_CODE=$?
   if [[ ${EXIT_CODE} -ne 0 ]]; then
-    warn "NemoClaw installer exited with code ${EXIT_CODE}."
-    warn "This may be OK if it stopped at the onboard wizard."
+    warn "Installer exited with code ${EXIT_CODE}."
     warn ""
-    warn "If the onboard wizard stopped due to cgroup issues, try:"
-    warn "  cd ${NEMOCLAW_DIR}"
-    warn "  nemoclaw setup-spark    # fixes Docker cgroup config"
+    warn "This is common — the onboard wizard may need manual steps."
+    warn "To complete setup manually:"
+    warn ""
+    warn "  cd ${DIR}"
+    if [[ "${OS_TYPE}" != "macos" ]]; then
+      warn "  nemoclaw setup-spark    # fix cgroup config (Linux/WSL2)"
+    fi
     warn "  nemoclaw onboard        # re-run the setup wizard"
     warn ""
-    warn "Continuing with remaining setup steps..."
+    warn "Continuing with policy setup..."
   fi
 }
 
-# --- Post-install: run setup-spark if needed --------------------------------
+# --- Post-install: find nemoclaw in PATH -----------------------------------
 post_install_fixups() {
-  # If nemoclaw is available and the onboard didn't complete,
-  # try running setup-spark to fix cgroup issues
   if command -v nemoclaw &>/dev/null 2>&1; then
     success "nemoclaw CLI available ✓"
-  else
-    NEMOCLAW_DIR="${INSTALL_DIR}/NemoClaw"
-    # Check common paths from npm global install
-    for BIN_PATH in \
-      "${NEMOCLAW_DIR}/node_modules/.bin/nemoclaw" \
-      "$(npm root -g 2>/dev/null)/nemoclaw/bin/nemoclaw" \
-      "${HOME}/.npm-global/bin/nemoclaw"; do
-      if [[ -f "${BIN_PATH}" ]]; then
-        export PATH="$(dirname "${BIN_PATH}"):${PATH}"
-        success "Found nemoclaw at ${BIN_PATH} ✓"
-        break
-      fi
-    done
+    return
   fi
+
+  # Search common locations
+  local DIR="${INSTALL_DIR}/NemoClaw"
+  for BIN_PATH in \
+    "${DIR}/node_modules/.bin/nemoclaw" \
+    "$(npm root -g 2>/dev/null)/nemoclaw/bin/nemoclaw" \
+    "${HOME}/.npm-global/bin/nemoclaw" \
+    "/usr/local/bin/nemoclaw"; do
+    if [[ -f "${BIN_PATH}" 2>/dev/null ]]; then
+      export PATH="$(dirname "${BIN_PATH}"):${PATH}"
+      success "Found nemoclaw at $(dirname "${BIN_PATH}") ✓"
+      return
+    fi
+  done
+
+  warn "nemoclaw not found in PATH after install."
 }
 
 # --- Verify installation ----------------------------------------------------
@@ -229,25 +272,25 @@ verify() {
   info "Verifying installation..."
   echo ""
 
-  # Check CLIs
   for CMD in nemoclaw openshell; do
     if command -v "${CMD}" &>/dev/null 2>&1; then
-      success "${CMD} CLI available ✓"
+      success "${CMD} CLI ✓"
     else
-      warn "${CMD} not found in PATH."
-      warn "Try: export PATH=\"\$HOME/.local/bin:\$PATH\""
+      warn "${CMD} not in PATH — add ~/.local/bin to your PATH"
     fi
   done
 
   echo ""
   info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  info "  If the onboard wizard didn't fully complete, finish it:"
+  info "  If the onboard wizard didn't complete, finish it:"
   info ""
   info "    cd ${INSTALL_DIR}/NemoClaw"
   info "    nemoclaw onboard"
-  info ""
-  info "  If it stopped on a cgroup error, run this first:"
-  info "    nemoclaw setup-spark"
+  if [[ "${OS_TYPE}" != "macos" ]]; then
+    info ""
+    info "  If it stopped on a cgroup error (Linux/WSL2 only):"
+    info "    nemoclaw setup-spark"
+  fi
   info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 

@@ -18,6 +18,37 @@ nemoclaw my-assistant logs --follow
 
 ## Common Issues
 
+### macOS: NemoClaw installer warns about OS / Ubuntu
+
+NemoClaw's installer was written for Ubuntu. On macOS, you may see warnings or the installer may exit early. This is cosmetic — the sandbox runs inside Docker (Linux containers), not on your Mac directly. To finish manually:
+
+```bash
+cd ~/.tng-nemoclaw/NemoClaw
+npm install
+npm link    # or: sudo npm link
+nemoclaw onboard
+```
+
+### macOS: "openshell: command not found"
+
+OpenShell installs to `~/.local/bin/` which isn't in PATH by default on macOS. Add it:
+```bash
+# For zsh (default on macOS)
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+
+# For bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bash_profile
+source ~/.bash_profile
+```
+
+### macOS: Docker Desktop not enough memory
+
+Docker Desktop defaults to limited memory on macOS. Bump it:
+1. Docker Desktop → Settings → Resources
+2. Set Memory to at least 8GB (16GB recommended for local inference)
+3. Apply & Restart
+
 ### WSL2: "Unit docker.service not found" or Docker won't start
 
 WSL2 doesn't use systemd by default. Docker is managed differently:

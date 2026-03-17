@@ -111,15 +111,23 @@ See [docs/POLICIES.md](docs/POLICIES.md) for how to write your own.
 
 ## Requirements
 
-- **OS:** Ubuntu 22.04 LTS or later (native Linux or WSL2)
-- **RAM:** 16GB minimum (32GB+ recommended for local inference)
-- **Docker:** Installed and running (Docker Desktop with WSL integration, or native)
+| | macOS | Linux | WSL2 |
+|---|---|---|---|
+| **OS** | macOS 13+ (Ventura) | Ubuntu 22.04+ | Ubuntu 22.04+ on Windows |
+| **Docker** | Docker Desktop for Mac | Docker Engine or Desktop | Docker Desktop with WSL integration |
+| **RAM** | 16GB+ | 16GB+ | 16GB+ |
+| **GPU** | Not needed (cloud inference) | NVIDIA GPU optional (local inference) | NVIDIA GPU optional |
+| **Arch** | Intel or Apple Silicon | x86_64 or aarch64 | x86_64 |
+
 - **NVIDIA API Key:** Free tier at [build.nvidia.com](https://build.nvidia.com) (for cloud inference)
-- **GPU (optional):** NVIDIA GPU for local Nemotron inference via vLLM
+
+### How macOS Works
+
+NemoClaw's sandbox uses Linux kernel security (Landlock, seccomp). On macOS, this works because the sandbox runs *inside Docker containers* — Docker Desktop provides a Linux VM under the hood. The NemoClaw CLI is Node.js (cross-platform) and OpenShell ships Darwin binaries. Your Mac never runs Linux primitives directly; the containers handle that.
 
 ### WSL2 Users
 
-The scripts auto-detect WSL2 and handle Docker differently (no `systemctl`). If using Docker Desktop, make sure WSL integration is enabled for your distro. If the onboard wizard stops with a cgroup error, run `nemoclaw setup-spark` to fix it — see [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+The scripts auto-detect WSL2 and handle Docker differently (no `systemctl`). If using Docker Desktop, make sure WSL integration is enabled for your distro. If the onboard wizard stops with a cgroup error, run `nemoclaw setup-spark` — see [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 ---
 
