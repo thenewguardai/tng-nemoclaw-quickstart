@@ -25,7 +25,7 @@ This affects everyone on WSL2 with an NVIDIA GPU. [Others have reported the same
 ### WSL2 (with or without NVIDIA GPU)
 
 ```bash
-git clone https://github.com/YOUR_ORG/tng-nemoclaw-quickstart.git
+git clone https://github.com/thenewguardai/tng-nemoclaw-quickstart.git
 cd tng-nemoclaw-quickstart
 
 # Phase 1: Install CLIs (one-time)
@@ -40,7 +40,7 @@ chmod +x scripts/*.sh setup.sh
 ### macOS (Docker Desktop)
 
 ```bash
-git clone https://github.com/YOUR_ORG/tng-nemoclaw-quickstart.git
+git clone https://github.com/thenewguardai/tng-nemoclaw-quickstart.git
 cd tng-nemoclaw-quickstart
 chmod +x scripts/*.sh setup.sh
 ./setup.sh
@@ -50,7 +50,7 @@ chmod +x scripts/*.sh setup.sh
 ### Native Linux (no GPU issues)
 
 ```bash
-git clone https://github.com/YOUR_ORG/tng-nemoclaw-quickstart.git
+git clone https://github.com/thenewguardai/tng-nemoclaw-quickstart.git
 cd tng-nemoclaw-quickstart
 chmod +x scripts/*.sh setup.sh
 ./setup.sh
