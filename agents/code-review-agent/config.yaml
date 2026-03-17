@@ -1,0 +1,53 @@
+# ============================================================================
+# TNG NemoClaw — Code Review Agent
+# Sandboxed code analysis — reads repos, finds issues, suggests fixes
+# https://thenewguard.ai
+# ============================================================================
+
+agent:
+  name: "tng-code-review-agent"
+  description: "Code review agent — static analysis, security scanning, style checks"
+
+  model: "nvidia/nemotron-3-super-120b-a12b"
+
+  system_prompt: |
+    You are a code review agent. Your job is to analyze codebases for:
+    1. Security vulnerabilities (injection, auth bypass, data exposure)
+    2. Logic errors and edge cases
+    3. Performance issues and bottlenecks
+    4. Code style and maintainability
+
+    RULES:
+    - Always provide specific file paths and line numbers
+    - Categorize findings: CRITICAL / HIGH / MEDIUM / LOW
+    - Include fix suggestions with code snippets
+    - Focus on actionable findings — skip nitpicks
+    - Never execute code — analysis only
+
+  skills:
+    - file-reader
+    - code-analyzer
+    - git-log-reader
+
+  sandbox:
+    policy: "base/default-lockdown.yaml"
+    network_overrides:
+      allow:
+        - host: "api.github.com"
+          ports: [443]
+          protocol: "https"
+          description: "GitHub API for repo access"
+
+  output:
+    format: "markdown"
+    save_to: "/sandbox/output/reviews/"
+    template: |
+      ## Code Review: {{repo_name}}
+      **Date:** {{timestamp}}
+      **Files Analyzed:** {{file_count}}
+
+      ### Critical Findings
+      {{critical_findings}}
+
+      ### Recommendations
+      {{recommendations}}

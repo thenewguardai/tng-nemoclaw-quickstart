@@ -1,0 +1,72 @@
+# ============================================================================
+# TNG NemoClaw — Legal Privilege Policy
+# For law firms and legal departments handling privileged documents
+# https://thenewguard.ai
+# ============================================================================
+#
+# WHAT THIS DOES:
+#   - LOCAL INFERENCE ONLY — privileged communications never leave premises
+#   - Internal systems only — no external API access
+#   - Document classification enforcement (privilege tagging)
+#   - Complete access logging for privilege log maintenance
+#
+# TO APPLY:
+#   openshell policy apply --network policies/legal/legal-privilege.yaml
+# ============================================================================
+
+version: "1.0"
+name: "tng-legal-privilege"
+description: "Attorney-client privilege protection — local inference, zero exfiltration"
+
+network:
+  egress:
+    allow:
+      # Internal DMS / practice management only
+      - host: "dms.your-firm.com"
+        ports: [443]
+        protocol: "https"
+        description: "Document Management System (REPLACE)"
+
+      - host: "practice.your-firm.com"
+        ports: [443]
+        protocol: "https"
+        description: "Practice Management (REPLACE)"
+
+    deny:
+      - host: "*"
+        description: "No external network access — privilege protection"
+
+  logging:
+    blocked_requests: true
+    allowed_requests: true
+    format: "json"
+
+filesystem:
+  writable:
+    - "/sandbox/workspace"
+    - "/sandbox/output"
+    - "/tmp"
+
+  containment_zones:
+    - path: "/sandbox/privileged"
+      description: "Privileged documents — no export, no cloud"
+      allow_export: false
+
+  logging:
+    all_access: true
+    include_file_hash: true
+    format: "json"
+
+process:
+  deny_privilege_escalation: true
+  seccomp_profile: "strict"
+  deny_new_namespaces: true
+
+inference:
+  provider: "vllm-local"
+  model: "nvidia/nemotron-3-nano-30b-a3b"
+
+  privacy_router:
+    enabled: true
+    allow_cloud: false
+    log_routing: true

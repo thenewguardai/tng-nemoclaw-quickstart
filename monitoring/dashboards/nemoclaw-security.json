@@ -1,0 +1,156 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "Blocked Network Requests (Last 24h)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "count_over_time({job=\"openshell\", component=\"network\"} |= \"blocked\" [5m])",
+          "legendFormat": "Blocked Requests"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "#E94560" },
+          "custom": { "fillOpacity": 20 }
+        }
+      }
+    },
+    {
+      "title": "Allowed Network Requests (Last 24h)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "count_over_time({job=\"openshell\", component=\"network\"} |= \"allowed\" [5m])",
+          "legendFormat": "Allowed Requests"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "#4CAF50" },
+          "custom": { "fillOpacity": 20 }
+        }
+      }
+    },
+    {
+      "title": "Filesystem Access Violations",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "count_over_time({job=\"openshell\", component=\"policy\"} |= \"filesystem_violation\" [5m])",
+          "legendFormat": "FS Violations"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "#FF9800" },
+          "custom": { "fillOpacity": 20 }
+        }
+      }
+    },
+    {
+      "title": "Inference Routing Decisions",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "count_over_time({job=\"nemoclaw\", component=\"inference\"} |= \"cloud\" [24h])",
+          "legendFormat": "Cloud"
+        },
+        {
+          "expr": "count_over_time({job=\"nemoclaw\", component=\"inference\"} |= \"local\" [24h])",
+          "legendFormat": "Local"
+        }
+      ]
+    },
+    {
+      "title": "Recent Blocked Requests (Log Stream)",
+      "type": "logs",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 16 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "{job=\"openshell\", component=\"network\"} |= \"blocked\"",
+          "maxLines": 100
+        }
+      ]
+    },
+    {
+      "title": "Privacy Router — Redacted Data Events",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 26 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "count_over_time({job=\"nemoclaw\", component=\"inference\"} |= \"redacted\" [24h])",
+          "legendFormat": "Redactions (24h)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "#E94560" }
+        }
+      }
+    },
+    {
+      "title": "Active Sandboxes",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 26 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "count_over_time({job=\"nemoclaw\", component=\"sandbox\"} |= \"running\" [1m])",
+          "legendFormat": "Sandboxes"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "#4CAF50" }
+        }
+      }
+    },
+    {
+      "title": "Policy Violations (Total 24h)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 26 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "count_over_time({job=\"openshell\"} |= \"violation\" [24h])",
+          "legendFormat": "Violations"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "#FF9800" },
+          "thresholds": {
+            "steps": [
+              { "color": "#4CAF50", "value": null },
+              { "color": "#FF9800", "value": 10 },
+              { "color": "#E94560", "value": 50 }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["nemoclaw", "tng", "security"],
+  "templating": { "list": [] },
+  "time": { "from": "now-24h", "to": "now" },
+  "title": "TNG NemoClaw — Agent Security Dashboard",
+  "uid": "tng-nemoclaw-security"
+}

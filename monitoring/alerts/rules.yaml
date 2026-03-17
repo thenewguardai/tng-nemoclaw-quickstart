@@ -1,0 +1,63 @@
+# ============================================================================
+# TNG NemoClaw — Alert Rules
+# Threshold-based alerts for agent security monitoring
+# Import into Grafana or use with Alertmanager
+# ============================================================================
+
+groups:
+  - name: nemoclaw_security
+    rules:
+      # Fire when blocked network requests spike
+      - alert: HighBlockedNetworkRequests
+        expr: count_over_time({job="openshell", component="network"} |= "blocked" [5m]) > 20
+        for: 2m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "Agent hitting network policy limits"
+          description: "More than 20 blocked outbound requests in 5 minutes. The agent may be trying to reach unauthorized endpoints — review the blocked request log."
+
+      # Fire on any filesystem violation
+      - alert: FilesystemAccessViolation
+        expr: count_over_time({job="openshell", component="policy"} |= "filesystem_violation" [5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: security
+        annotations:
+          summary: "Agent attempted filesystem access outside sandbox"
+          description: "The agent tried to read or write outside /sandbox and /tmp. This could indicate a compromised skill or prompt injection. Investigate immediately."
+
+      # Fire when privilege escalation is attempted
+      - alert: PrivilegeEscalationAttempt
+        expr: count_over_time({job="openshell", component="policy"} |= "privilege_escalation" [5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: security
+        annotations:
+          summary: "Privilege escalation attempt detected"
+          description: "The sandboxed agent attempted privilege escalation. This is blocked by seccomp policy but should be investigated as a potential compromise indicator."
+
+      # Fire when privacy router redacts data heading to cloud
+      - alert: HighRedactionRate
+        expr: count_over_time({job="nemoclaw", component="inference"} |= "redacted" [15m]) > 50
+        for: 5m
+        labels:
+          severity: warning
+          team: data
+        annotations:
+          summary: "High rate of PII/sensitive data redaction"
+          description: "The privacy router is redacting a lot of data from cloud-bound inference requests. Review whether the agent is handling more sensitive data than expected."
+
+      # Fire when sandbox goes down
+      - alert: SandboxDown
+        expr: absent_over_time({job="nemoclaw", component="sandbox"} |= "heartbeat" [2m])
+        for: 3m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "NemoClaw sandbox unresponsive"
+          description: "No heartbeat from sandbox in 3+ minutes. The agent may have crashed or the sandbox was terminated. Check: nemoclaw my-assistant status"

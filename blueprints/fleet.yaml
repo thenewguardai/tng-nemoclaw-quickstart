@@ -1,0 +1,22 @@
+# ============================================================================
+# TNG NemoClaw — Example Fleet Configuration
+# Deploy multiple agents with different roles, policies, and inference
+#
+# Usage: python blueprints/multi_agent.py --config blueprints/fleet.yaml
+# ============================================================================
+
+agents:
+  - name: researcher
+    policy: policies/dev/permissive-dev.yaml
+    profile: default
+    description: "Web research agent — broader network access for discovery"
+
+  - name: code-reviewer
+    policy: policies/base/default-lockdown.yaml
+    profile: vllm
+    description: "Code analysis — local inference, minimal network"
+
+  - name: data-analyst
+    policy: policies/base/default-lockdown.yaml
+    profile: nim-local
+    description: "Data processing — fully offline, no cloud"

@@ -1,0 +1,53 @@
+# ============================================================================
+# TNG NemoClaw — Research Agent
+# Sandboxed web research with source tracking and citation
+# https://thenewguard.ai
+# ============================================================================
+
+agent:
+  name: "tng-research-agent"
+  description: "Web research agent with source tracking — sandboxed by NemoClaw"
+
+  # Base model for reasoning
+  model: "nvidia/nemotron-3-super-120b-a12b"
+
+  # System prompt — opinionated and task-focused
+  system_prompt: |
+    You are a research agent. Your job is to find, verify, and synthesize
+    information from approved sources.
+
+    RULES:
+    - Always cite your sources with URLs
+    - Cross-reference claims across multiple sources before presenting them
+    - Flag conflicting information explicitly
+    - Output structured summaries: findings, sources, confidence level
+    - Never fabricate sources or citations
+    - If you cannot verify a claim, say so
+
+  # Skills this agent can use
+  skills:
+    - web-search
+    - document-reader
+    - summarizer
+
+  # Sandbox profile
+  sandbox:
+    policy: "base/default-lockdown.yaml"
+    # Override network for research — add search APIs
+    network_overrides:
+      allow:
+        - host: "api.bing.com"
+          ports: [443]
+          protocol: "https"
+          description: "Bing Search API"
+        - host: "serpapi.com"
+          ports: [443]
+          protocol: "https"
+          description: "SerpAPI for search results"
+
+  # Output configuration
+  output:
+    format: "markdown"
+    save_to: "/sandbox/output/research/"
+    include_sources: true
+    include_timestamps: true

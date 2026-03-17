@@ -1,0 +1,65 @@
+# ============================================================================
+# TNG NemoClaw — Promtail Configuration
+# Collects logs from NemoClaw and OpenShell for Grafana dashboards
+# ============================================================================
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # NemoClaw sandbox logs
+  - job_name: nemoclaw-sandbox
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: nemoclaw
+          component: sandbox
+          __path__: /var/log/nemoclaw/**/sandbox*.log
+
+  # OpenShell policy enforcement logs
+  - job_name: openshell-policy
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: openshell
+          component: policy
+          __path__: /var/log/nemoclaw/**/policy*.log
+
+  # Network egress logs (blocked + allowed)
+  - job_name: network-egress
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: openshell
+          component: network
+          __path__: /var/log/nemoclaw/**/network*.log
+
+  # Inference routing logs
+  - job_name: inference-routing
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: nemoclaw
+          component: inference
+          __path__: /var/log/nemoclaw/**/inference*.log
+
+  # General NemoClaw setup logs
+  - job_name: nemoclaw-setup
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: nemoclaw
+          component: setup
+          __path__: /var/log/nemoclaw/setup.log

@@ -1,0 +1,92 @@
+# ============================================================================
+# TNG NemoClaw — Default Lockdown Policy
+# Maximum restriction baseline. Start here, open only what you need.
+# https://thenewguard.ai
+# ============================================================================
+#
+# WHAT THIS DOES:
+#   - Blocks ALL outbound network except inference endpoints
+#   - Restricts filesystem to /sandbox and /tmp only
+#   - Denies privilege escalation and dangerous syscalls
+#   - Routes all inference through OpenShell's controlled pipeline
+#
+# USE WHEN:
+#   - First deployment / testing
+#   - Evaluating NemoClaw before customizing
+#   - Any scenario where you want maximum restriction
+#
+# TO APPLY:
+#   openshell policy apply --network policies/base/default-lockdown.yaml
+# ============================================================================
+
+version: "1.0"
+name: "tng-default-lockdown"
+description: "Maximum restriction baseline — deny all, allow only inference"
+
+network:
+  egress:
+    # Allow inference API endpoints only
+    allow:
+      - host: "integrate.api.nvidia.com"
+        ports: [443]
+        protocol: "https"
+        description: "NVIDIA Cloud inference API"
+
+      - host: "api.nvidia.com"
+        ports: [443]
+        protocol: "https"
+        description: "NVIDIA API services"
+
+    # Block everything else — this is the default, but being explicit
+    deny:
+      - host: "*"
+        description: "Deny all other outbound traffic"
+
+  # Log all blocked requests for audit
+  logging:
+    blocked_requests: true
+    allowed_requests: true
+    format: "json"
+
+filesystem:
+  # Only /sandbox and /tmp are writable
+  writable:
+    - "/sandbox"
+    - "/tmp"
+
+  # Everything else is read-only or blocked
+  blocked:
+    - "/etc"
+    - "/var"
+    - "/home"
+    - "/root"
+    - "/usr"
+    - "/opt"
+
+  logging:
+    access_violations: true
+
+process:
+  # Block privilege escalation
+  deny_privilege_escalation: true
+
+  # Restrict dangerous syscalls via seccomp
+  seccomp_profile: "strict"
+
+  # No new namespaces from inside sandbox
+  deny_new_namespaces: true
+
+inference:
+  # Default to NVIDIA Cloud API
+  provider: "nvidia-cloud"
+  model: "nvidia/nemotron-3-super-120b-a12b"
+
+  # Privacy router settings
+  privacy_router:
+    enabled: true
+    # Never send these patterns to cloud
+    redact_patterns:
+      - "SSN:\\d{3}-\\d{2}-\\d{4}"
+      - "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b"
+    # Log all inference routing decisions
+    log_routing: true

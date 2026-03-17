@@ -1,0 +1,63 @@
+# ============================================================================
+# TNG NemoClaw — Monitoring Stack
+# Loki (log aggregation) + Promtail (collection) + Grafana (dashboards)
+#
+# This gives you a real-time view of what your sandboxed agents are doing:
+#   - Blocked network requests
+#   - Filesystem access violations
+#   - Inference routing decisions
+#   - Policy violation alerts
+#
+# USAGE:
+#   cd monitoring/
+#   docker compose up -d
+#   Open http://localhost:3000 (Grafana — admin/tng-nemoclaw)
+# ============================================================================
+
+services:
+  # --- Loki: Log aggregation ------------------------------------------------
+  loki:
+    image: grafana/loki:2.9.4
+    container_name: tng-loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki-data:/loki
+    restart: unless-stopped
+
+  # --- Promtail: Log collection from NemoClaw/OpenShell --------------------
+  promtail:
+    image: grafana/promtail:2.9.4
+    container_name: tng-promtail
+    volumes:
+      # Mount NemoClaw log directories
+      - ${HOME}/.tng-nemoclaw:/var/log/nemoclaw:ro
+      - /var/log:/var/log/host:ro
+      - ./promtail-config.yaml:/etc/promtail/config.yml:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  # --- Grafana: Dashboards and alerting ------------------------------------
+  grafana:
+    image: grafana/grafana:10.3.1
+    container_name: tng-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=tng-nemoclaw
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+volumes:
+  loki-data:
+  grafana-data:

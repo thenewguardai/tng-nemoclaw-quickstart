@@ -1,0 +1,119 @@
+# ============================================================================
+# TNG NemoClaw — HIPAA Agent Policy
+# For healthcare deployments handling Protected Health Information (PHI)
+# https://thenewguard.ai
+# ============================================================================
+#
+# WHAT THIS DOES:
+#   - Forces ALL inference to local models (no cloud — PHI never leaves)
+#   - Allows only allowlisted EHR/healthcare API endpoints
+#   - Aggressive PII/PHI redaction in the privacy router
+#   - Full audit logging on every file access and network call
+#   - Filesystem isolation with PHI-specific containment
+#
+# COMPLIANCE NOTES:
+#   - This policy template addresses HIPAA Technical Safeguards (§164.312)
+#   - You MUST customize the allowed endpoints for your EHR vendor
+#   - This is a starting point — work with your compliance team
+#   - Audit logs should be forwarded to your SIEM
+#
+# TO APPLY:
+#   openshell policy apply --network policies/healthcare/hipaa-agent.yaml
+# ============================================================================
+
+version: "1.0"
+name: "tng-hipaa-healthcare"
+description: "HIPAA-compliant agent policy — local inference only, PHI isolation"
+
+network:
+  egress:
+    allow:
+      # ----------------------------------------------------------------
+      # CUSTOMIZE THESE: Add your EHR and healthcare system endpoints
+      # ----------------------------------------------------------------
+      - host: "api.your-ehr-vendor.com"
+        ports: [443]
+        protocol: "https"
+        description: "EHR system API (REPLACE with your vendor)"
+
+      - host: "fhir.your-hospital.org"
+        ports: [443]
+        protocol: "https"
+        description: "FHIR server endpoint (REPLACE with yours)"
+
+      # NOTE: No NVIDIA cloud endpoints — all inference is local
+      # This ensures PHI never leaves your infrastructure
+
+    deny:
+      - host: "*"
+        description: "Deny all non-allowlisted traffic"
+
+  logging:
+    blocked_requests: true
+    allowed_requests: true
+    format: "json"
+    # HIPAA requires 6-year retention — forward these to your SIEM
+    include_headers: false
+    include_body_hash: true
+
+filesystem:
+  writable:
+    - "/sandbox/workspace"
+    - "/sandbox/output"
+    - "/tmp"
+
+  blocked:
+    - "/etc"
+    - "/var"
+    - "/home"
+    - "/root"
+
+  # PHI containment: all files with patient data stay in /sandbox/phi
+  # and cannot be copied outside
+  containment_zones:
+    - path: "/sandbox/phi"
+      description: "PHI containment zone — no external transfer"
+      allow_export: false
+
+  logging:
+    # Log every file read/write for HIPAA audit trail
+    all_access: true
+    format: "json"
+
+process:
+  deny_privilege_escalation: true
+  seccomp_profile: "strict"
+  deny_new_namespaces: true
+
+inference:
+  # LOCAL ONLY — PHI must never leave the infrastructure
+  provider: "nim-local"
+  model: "nvidia/nemotron-3-super-120b-a12b"
+
+  # Fallback — use smaller local model if NIM isn't available
+  fallback:
+    provider: "vllm-local"
+    model: "nvidia/nemotron-3-nano-30b-a3b"
+
+  privacy_router:
+    enabled: true
+    # Block cloud routing entirely
+    allow_cloud: false
+
+    # Aggressive PHI redaction patterns
+    redact_patterns:
+      # SSN
+      - "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+      # MRN (Medical Record Number) — common formats
+      - "\\bMRN[:\\s]*\\d{6,10}\\b"
+      # Date of birth patterns
+      - "\\bDOB[:\\s]*\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4}\\b"
+      # Phone numbers
+      - "\\b\\d{3}[-.\\s]?\\d{3}[-.\\s]?\\d{4}\\b"
+      # Email addresses
+      - "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b"
+      # Names following common clinical patterns
+      - "\\bPatient[:\\s]+[A-Z][a-z]+ [A-Z][a-z]+\\b"
+
+    log_routing: true
+    log_redactions: true
